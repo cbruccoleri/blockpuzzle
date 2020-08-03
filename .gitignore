@@ -1,0 +1,3 @@
+# .gitignore patterns
+# ignore the build directory
+build/
