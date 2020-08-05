@@ -30,6 +30,7 @@
 #include <functional>
 #include <iostream>
 #include <iomanip>
+#include <chrono>
 
 
 // Generic unsigned integer
@@ -42,6 +43,7 @@ constexpr uint_t uPuzzleSideSize = 3;
 constexpr uint_t uNumTiles = uPuzzleSideSize * uPuzzleSideSize;
 constexpr uint_t uScreenWidth = uBlockSize*uPuzzleSideSize;
 constexpr uint_t uScreenHeight = uBlockSize*uPuzzleSideSize;
+
 
 /**
  * A tile puzzle, like "8" or "15".
@@ -81,8 +83,9 @@ public:
 		if (m_bShuffle) {
 			std::random_shuffle(m_sTiles.begin(), m_sTiles.end());
 		}
-		m_bGameOver = false;
-		m_posMovable = FindMovable();
+		m_bReplayMode = false;
+		m_bGameOver   = IsEndState();
+		m_posMovable  = FindMovable();
 		return true;
 	}
 
@@ -125,9 +128,21 @@ public:
 		}
 		if (GetKey(Key::F2).bPressed) {
 			auto solVector = DepthFirstSearch();
+			m_actionListSol = std::move(solVector);
 			//test_hashInsertion();
-		}		
-		if (! m_bGameOver) {
+		}
+		if (GetKey(Key::F3).bPressed) {
+			// add the solution actions to the queue, in reverse order
+			std::cout << "Adding solution to queue: " << m_actionListSol.size() << " nodes.\n";
+			for (auto itActNode = m_actionListSol.rbegin(); 
+				 itActNode != m_actionListSol.rend(); 
+				 ++itActNode) {
+				m_qActions.push_back((*itActNode)->action);
+			}
+			std::cout << "Queue length: " << m_qActions.size() << "\n";
+			m_bReplayMode = true; // disable key strokes while replaying
+		}
+		if (! (m_bGameOver || m_bReplayMode)) {
 			// Move the empty tile using the Arrow Keys
 			if (GetKey(Key::UP).bPressed && IsValidAction(Actions::MoveUp)) {
 				m_qActions.push_back(Actions::MoveUp);			
@@ -153,8 +168,12 @@ public:
 		if (! m_qActions.empty()) {
 			DoAction(m_qActions.front());
 			m_qActions.pop_front();
+			if (m_bReplayMode) { // we are replaying actions
+				using namespace std::chrono_literals;
+				std::this_thread::sleep_for(500ms);
+			}
+			m_bGameOver = IsEndState();
 		}
-		m_bGameOver = IsEndState();
 		return true;
 	}
 
@@ -181,6 +200,17 @@ private:
 	// Actions are queued as integers (see also Actions enumeration)
 	typedef std::deque<Actions> 	QueueActions;
 
+	// Forward declaration, see below.
+	struct ActionNode;
+	/// A (more readable) pointer to a node.
+	typedef std::shared_ptr<ActionNode> ActionNodePtr;
+
+	/// A vector of pointers to nodes
+	typedef std::vector<ActionNodePtr> 	ActionPtrList;
+
+	/// A queue of pointers to nodes
+	typedef std::deque<ActionNodePtr>  	ActionPtrDeque;
+
 	// defines the end-state of the game;
 	static const std::string sEndState;
 	// State of the tiles, by row.
@@ -192,8 +222,12 @@ private:
 	bool 			m_bShuffle;
 	// If true, no more moves are processed and the game is over.
 	bool 			m_bGameOver;
+	// If true, enables replay mode.
+	bool 			m_bReplayMode;
 	// Queue containing the actions to be performed.
 	QueueActions	m_qActions;
+	// Solution list
+	ActionPtrList 	m_actionListSol;
 
 private:
 	// Methods that manipulate the state
@@ -281,9 +315,6 @@ private:
 private:
 	// Implementation of search algorithms
 
-	struct ActionNode;
-	/// A (more readable) pointer to a node.
-	typedef std::shared_ptr<ActionNode> ActionNodePtr;
 
 	/**
 	 * Auxiliary node-structure used for searching.
@@ -359,12 +390,6 @@ private:
 		}
 	};
 
-
-	/// A vector of pointers to nodes
-	typedef std::vector<ActionNodePtr> 	ActionPtrList;
-
-	/// A queue of pointers to nodes
-	typedef std::deque<ActionNodePtr>  	ActionPtrDeque;
 
 	/**
 	 * Hash functor to be used with  std::unordered_set<>
@@ -485,7 +510,10 @@ private:
 		ActionNodePtr pRootNode = std::make_shared<ActionNode>();
 		pRootNode->sBoard = m_sTiles;
 		//DepthFirstSearchRec(nodeGoal, pRootNode, hashVisited, listSolution);
-		DepthFirstSearchIter(nodeGoal, pRootNode, listSolution);
+		for (int iDepth = 1; iDepth <= 105 && listSolution.size() == 0; iDepth++ ) {
+			DepthFirstSearchIter(nodeGoal, pRootNode, listSolution, iDepth);
+			std::cout << "D: " << iDepth << '\n';
+		}
 		std::cout << "Sol Length: " << listSolution.size() << '\n';
 		std::cout << " Hash hits: " << nHashHits << '\n';
 		std::cout << "  Num Exp.: " << nExpansions << std::endl;
@@ -554,18 +582,22 @@ private:
 
 	/**
 	 * Recursive Depth-First Search with Visited set algorithm.
+	 * If the last argument, `iMaxDepth` is used, it will only search down to the specified depth. If this argument
+	 * is negative, it will not apply a maximum depth limit. This is useful to call this function with the Iterative
+	 * Depth-First Search paradigm.
 	 */
-	bool DepthFirstSearchIter(const ActionNode& nodeGoal, ActionNodePtr& pCurNode, ActionPtrList& listSolution)
+	bool DepthFirstSearchIter(const ActionNode& nodeGoal, ActionNodePtr pCurNode, ActionPtrList& listSolution, int iMaxDepth=-1)
 	{
 		ActionPtrHash 	hashVisited;
 		ActionPtrDeque	dequeExpanded;
 		dequeExpanded.push_front(pCurNode);
-		while (dequeExpanded.size() > 0)
+		int iDepth = 1;
+		while (dequeExpanded.size() > 0 && iDepth <= iMaxDepth)
 		{
 			pCurNode = dequeExpanded.front();
 			dequeExpanded.pop_front();
 			auto pair = hashVisited.insert(pCurNode);
-			if (pair.second) {
+			if (pair.second) { // the current node is not in the visited table
 				if (pCurNode->sBoard == nodeGoal.sBoard) {
 					// goal reached: build the solution backward
 					listSolution.push_back(pCurNode);
@@ -579,9 +611,14 @@ private:
 					// expand the actions available in the current node, get a list of node-pointers
 					// to the child action-nodes.
 					auto validChildrenList = GetValidMoves(pCurNode);
-					// OPTIONAL: sort them in ascending order by Score
-					// recall: in depth first you need FIFO order, so the best is last
-					std::sort(validChildrenList.begin(), validChildrenList.end(), NodeScoreCompare{});
+					// if iMaxDepth was -1, make sure you continue searching indefinitely
+					if (validChildrenList.size() > 0) {
+						// at every expansion, we descend one level down
+						iDepth = iMaxDepth < 0 ? iDepth: iDepth + 1;
+						// OPTIONAL: sort them in ascending order by Score
+						// recall: in depth first you need FIFO order, so the best is last
+						std::sort(validChildrenList.begin(), validChildrenList.end(), NodeScoreCompare{});
+					}
 					// enqueue at front if the node has not already been expanded before
 					for (auto& childNode: validChildrenList) {
 						auto iterFoundNode = hashVisited.find(childNode);
@@ -599,10 +636,9 @@ private:
 		return false;
 	}
 
-	// TODO: REMOVE
+	// auxiliary variables to report algorithm performance
 	size_t nHashHits = 0;
 	size_t nExpansions = 0;
-	////////////////
 
 	/**
 	 * Apply the specified action to the second argument.
