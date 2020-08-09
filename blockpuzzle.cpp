@@ -126,21 +126,40 @@ public:
 			m_bShuffle = true;
 			OnUserCreate();
 		}
+		if (GetKey(Key::F1).bPressed) {
+			std::cout << "    F1: Output this help to stdout.\n"
+				 	  << "    F2: Execute Depth-First Search on the current configuration.\n"
+				 	  << "    F3: Replay found solution.\n"
+					  << "    F4: Swap two random tiles.\n"
+				 	  << "Arrows: move the blank tile manually.\n\n";
+		}
 		if (GetKey(Key::F2).bPressed) {
+			ClearSearchState();
 			auto solVector = DepthFirstSearch();
 			m_actionListSol = std::move(solVector);
 			//test_hashInsertion();
 		}
 		if (GetKey(Key::F3).bPressed) {
-			// add the solution actions to the queue, in reverse order
-			std::cout << "Adding solution to queue: " << m_actionListSol.size() << " nodes.\n";
-			for (auto itActNode = m_actionListSol.rbegin(); 
-				 itActNode != m_actionListSol.rend(); 
-				 ++itActNode) {
-				m_qActions.push_back((*itActNode)->action);
+			// if the list of solution steps is empty, build it
+			if (m_qActions.size() == 0) {
+				std::cout << "Adding solution to queue: " << m_actionListSol.size() << " nodes.\n";
+				// add the solution actions to the queue, in reverse order
+				for (auto itActNode = m_actionListSol.rbegin(); 
+					itActNode != m_actionListSol.rend(); 
+					++itActNode) {
+					m_qActions.push_back((*itActNode)->action);
+				}
 			}
-			std::cout << "Queue length: " << m_qActions.size() << "\n";
-			m_bReplayMode = true; // disable key strokes while replaying
+			// set UI mode to replay
+			if (m_qActions.size() > 0) {
+				m_bReplayMode = true; // disable key strokes while replaying
+				// reset the board to the initial state for this solution
+				m_sTiles = (*m_actionListSol.rbegin())->sBoard;
+				m_posMovable = FindMovable();
+			}
+		}
+		if (GetKey(Key::F4).bPressed) {
+			SwapRandomTiles();
 		}
 		if (! (m_bGameOver || m_bReplayMode)) {
 			// Move the empty tile using the Arrow Keys
@@ -159,6 +178,8 @@ public:
 		}
 		return true;
 	}
+
+
 
 	/**
 	 * Perform the actions in the actions queue.
@@ -214,7 +235,6 @@ private:
 	// defines the end-state of the game;
 	static const std::string sEndState;
 	// State of the tiles, by row.
-	//std::string		m_sTiles = "12345678 ";
 	std::string		m_sTiles = "1234567 8";
 	// Position of the movable empty square.
 	olc::vi2d 		m_posMovable = {-1, -1}; // set to invalid position initially
@@ -228,9 +248,23 @@ private:
 	QueueActions	m_qActions;
 	// Solution list
 	ActionPtrList 	m_actionListSol;
+	// auxiliary variables to report algorithm performance
+	size_t nHashHits = 0;
+	size_t nExpansions = 0;
 
 private:
 	// Methods that manipulate the state
+
+	/**
+	 * Clear the solution list, the moves queue, and the book-keeping variables.
+	 */
+	void ClearSearchState()
+	{
+		m_actionListSol.clear();
+		m_qActions.clear();
+		nHashHits = 0;
+		nExpansions = 0;
+	}
 
 
 	[[nodiscard]] bool IsEndState() const
@@ -291,6 +325,34 @@ private:
 		}
 	}
 
+
+	/**
+	 * Swap two random adjacent items of the board.
+	 * 
+	 * This function is useful because about half of the random configuration of the board
+	 * are not solvable. Thus, switching two items make the configuration solvable.
+	 * This provides a convenient hack to easily generate solvable configurations.
+	 */
+	void SwapRandomTiles()
+	{
+		int i = RndIntRange(0, m_sTiles.size()-1);
+		int j = (i + 1) % m_sTiles.size();
+		std::swap(m_sTiles[i], m_sTiles[j]);
+		m_posMovable = FindMovable();
+	}
+
+	/**
+	 * Return a uniformly distributed integer between low and high, extrema included.
+	 */
+	static int RndIntRange(int low, int high)
+	{
+		std::random_device rd;
+		std::default_random_engine rg(rd());
+		if (low > high)
+			std::swap(low, high);
+		std::uniform_int_distribution<int> uni_int_range(low, high);
+		return uni_int_range(rg);
+	}
 
 	/**
 	 * Move the blank tile in the new position.
@@ -501,7 +563,10 @@ private:
 		return pNewNode;
 	}
 
-	ActionPtrList DepthFirstSearch()
+	/**
+	 * Iterative Deepening Depth-First Search.
+	 */
+	ActionPtrList DepthFirstSearch(size_t uMaxDepth=2048)
 	{
 		ActionPtrList listSolution;
 		//ActionPtrHash hashVisited;
@@ -509,14 +574,22 @@ private:
 		ActionNode nodeGoal{Actions::Nothing, sEndState, 0, 0, nullptr};
 		ActionNodePtr pRootNode = std::make_shared<ActionNode>();
 		pRootNode->sBoard = m_sTiles;
+		bool bFound = false;
 		//DepthFirstSearchRec(nodeGoal, pRootNode, hashVisited, listSolution);
-		for (int iDepth = 1; iDepth <= 105 && listSolution.size() == 0; iDepth++ ) {
-			DepthFirstSearchIter(nodeGoal, pRootNode, listSolution, iDepth);
-			std::cout << "D: " << iDepth << '\n';
+		for (int iDepth = 16; iDepth <= uMaxDepth && listSolution.size() == 0; iDepth *= 2 ) {
+			bFound = DepthFirstSearchIter(nodeGoal, pRootNode, listSolution, iDepth);
+			std::cout << "Trying at Depth: " << iDepth << '\r';
 		}
-		std::cout << "Sol Length: " << listSolution.size() << '\n';
-		std::cout << " Hash hits: " << nHashHits << '\n';
-		std::cout << "  Num Exp.: " << nExpansions << std::endl;
+		std::cout << '\n';
+		if (! bFound) {
+			std::cout << "Reached maximum depth: solution not found.\n";
+		}
+		else {
+			std::cout << "-- Found Solution"
+				<< "  Num. Moves: " << listSolution.size() << '\n'
+				<< "   Hash hits: " << nHashHits << '\n'
+				<< "Num. Expans.: " << nExpansions << std::endl;
+		}
 		WriteNodeList(listSolution);
 		return listSolution;
 	}
@@ -537,6 +610,11 @@ private:
 
 	/**
 	 * Recursive Depth-First Search with Visited set algorithm.
+	 * 
+	 * Do not use this function for any practical purpose: the recursion limit,
+	 * even with a modern computer, will make it fail because the stack is too small.
+	 * It is implemented here only for reference and because some exercise may 
+	 * require it implemented this way.
 	 */
 	bool DepthFirstSearchRec(const ActionNode& nodeGoal, ActionNodePtr pCurNode, 
 							 ActionPtrHash& hashVisited, ActionPtrList& listSolution)
@@ -552,7 +630,7 @@ private:
 				auto pair = hashVisited.insert(pCurNode);
 				if (! pair.second) { // insertion failed
 					// TODO: use a non-console logging mechanism
-					std::cerr << "!! Warning: insertion of " << *pair.first << " failed.\n";
+					std::cerr << "Insertion of " << *pair.first << " failed.\n";
 				}
 				// expand the actions available in the current node, get a list of node-pointers
 				// to the child action-nodes.
@@ -636,9 +714,7 @@ private:
 		return false;
 	}
 
-	// auxiliary variables to report algorithm performance
-	size_t nHashHits = 0;
-	size_t nExpansions = 0;
+
 
 	/**
 	 * Apply the specified action to the second argument.
@@ -684,12 +760,21 @@ private:
 	 * Helper function to output a list of nodes into a stream.
 	 * Default is output to stdout.
 	 */
-	static void WriteNodeList(const ActionPtrList& pNodeList, std::ostream& os = std::cout)
+	static void WriteNodeList(const ActionPtrList& pNodeList, bool bFull=false, std::ostream& os = std::cout)
 	{
 		os << "--- Node ---\n";
+		size_t count = 0;
+		bool bEllipsis = false;
 		for (auto& pNode: pNodeList) {
-			WriteActionNode(*pNode);
-			os << '\n';
+			if (bFull || (count < 3) || (count >= (pNodeList.size() - 3))) {
+				WriteActionNode(*pNode);
+				os << '\n';
+			}
+			else if (! bEllipsis) {
+				os << "  ...\n";
+				bEllipsis = true;
+			}
+			count ++;
 		}
 		os << "\n";
 	}
