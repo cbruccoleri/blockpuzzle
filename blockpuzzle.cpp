@@ -24,6 +24,7 @@
 #include <string>
 #include <array>
 #include <deque>
+#include <queue>
 #include <vector>
 #include <unordered_set>
 #include <algorithm>
@@ -131,6 +132,7 @@ public:
 				 	  << "    F2: Execute Depth-First Search on the current configuration.\n"
 				 	  << "    F3: Replay found solution.\n"
 					  << "    F4: Swap two random tiles.\n"
+					  << " Space: Shuffle the tiles.\n"
 				 	  << "Arrows: move the blank tile manually.\n\n";
 		}
 		if (GetKey(Key::F2).bPressed) {
@@ -672,8 +674,10 @@ private:
 		int iDepth = 1;
 		while (dequeExpanded.size() > 0 && iDepth <= iMaxDepth)
 		{
+			// get first node in the queue
 			pCurNode = dequeExpanded.front();
 			dequeExpanded.pop_front();
+			// add it to the hash-table of visited nodes
 			auto pair = hashVisited.insert(pCurNode);
 			if (pair.second) { // the current node is not in the visited table
 				if (pCurNode->sBoard == nodeGoal.sBoard) {
@@ -685,15 +689,15 @@ private:
 					}
 					return true;
 				}
-				else {
+				else { // the goal has not been reached yet
 					// expand the actions available in the current node, get a list of node-pointers
 					// to the child action-nodes.
 					auto validChildrenList = GetValidMoves(pCurNode);
-					// if iMaxDepth was -1, make sure you continue searching indefinitely
 					if (validChildrenList.size() > 0) {
 						// at every expansion, we descend one level down
+						// but if iMaxDepth was -1, make sure you continue searching indefinitely
 						iDepth = iMaxDepth < 0 ? iDepth: iDepth + 1;
-						// OPTIONAL: sort them in ascending order by Score
+						// OPTIONAL: sort them in ascending order by Score, thus checking the most promising first
 						// recall: in depth first you need FIFO order, so the best is last
 						std::sort(validChildrenList.begin(), validChildrenList.end(), NodeScoreCompare{});
 					}
@@ -710,7 +714,57 @@ private:
 		}
 		// no branch reaches a solution, clean up and exit
 		for (auto& shrd_ptr: hashVisited)
-			shrd_ptr->prev=nullptr; // make sure there are no "loops" of pointers
+			// make sure there are no "loops" of pointers
+			// before the destructor for the hash table is called
+			shrd_ptr->prev=nullptr;
+		return false;
+	}
+
+
+	/// Define a function object type to compare items in the queue
+	struct CmpQueueItemsGreater {
+		bool operator()(const ActionNodePtr& p1, const ActionNodePtr& p2) {
+			return p1->cost < p2->cost;
+		}
+	};
+
+	/// A PriorityQueue Type to hold pointer to nodes.
+	typedef std::priority_queue<ActionNodePtr, 
+								std::vector<ActionNodePtr>, 
+								CmpQueueItemsGreater> 	PriorityQueue;
+
+	/**
+	 * Branch-and-Bound search.
+	 * 
+	 * The key idea is to expand the best path in the queue, keeping all partial paths.
+	 * The algorithm terminates when the best path in the queue ends with the goal. This is,
+	 * essentially, Dijkstra algorithm, except that it stops when it finds the optimal path
+	 * to the goal, rather than finding the cost to reach all possible nodes.
+	 * 
+	 * Regarding the implementation, an efficient way to implement the priority-queue is to use
+	 * a Heap Data Structure. The C++ standard library provides an implementation of a priority queue.
+	 * A hash-table is used to keep track of the expanded nodes, thus avoiding unnecessary expansions.
+	 * 
+	 * [1] Winston, P. H., "Artificial Intelligence", 3rd Ed., Pearson, 1992, Ch. 5, p. 82
+	 */
+	bool BranchAndBound(const ActionNode& nodeGoal, ActionNodePtr pCurNode, ActionPtrList& listSolution)
+	{
+		
+		return false;
+	}
+
+
+	/**
+	 * A* (A-star) Search algorithm
+	 * 
+	 * A comprehensive description of the algorithm can be found in the following sources:
+	 * 
+	 * [1] 	Russel, S. and Norvig, P., "Artificial Intelligence: a Modern Approach", 4th Ed, Pearson, 2009, Ch 5, p. 199.
+	 * [2]  Winston, P. H., "Artificial Intelligence", 3rd Ed., Pearson, 1992, p. 
+	 */
+	bool Astar(const ActionNode& nodeGoal, ActionNodePtr pCurNode, ActionPtrList& listSolution)
+	{
+		// TODO
 		return false;
 	}
 
